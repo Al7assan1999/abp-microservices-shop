@@ -1,0 +1,48 @@
+services:
+  postgres:
+    image: postgres:17-alpine
+    environment:
+      POSTGRES_USER: shop
+      POSTGRES_PASSWORD: shop
+    volumes:
+      - ./deploy/postgres-init.sql:/docker-entrypoint-initdb.d/init.sql:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U shop"]
+      interval: 5s
+      retries: 20
+
+  rabbitmq:
+    image: rabbitmq:4-management-alpine
+    ports:
+      - "15672:15672"   # management UI: http://localhost:15672 (guest / guest)
+    healthcheck:
+      test: ["CMD", "rabbitmq-diagnostics", "-q", "ping"]
+      interval: 5s
+      retries: 30
+
+  catalog:
+    build: { context: ., args: { SERVICE: Catalog } }
+    environment:
+      ConnectionStrings__Catalog: Host=postgres;Database=shop_catalog;Username=shop;Password=shop
+      RabbitMQ__Connections__Default__HostName: rabbitmq
+    depends_on:
+      postgres: { condition: service_healthy }
+      rabbitmq: { condition: service_healthy }
+
+  ordering:
+    build: { context: ., args: { SERVICE: Ordering } }
+    environment:
+      ConnectionStrings__Ordering: Host=postgres;Database=shop_ordering;Username=shop;Password=shop
+      RabbitMQ__Connections__Default__HostName: rabbitmq
+    depends_on:
+      postgres: { condition: service_healthy }
+      rabbitmq: { condition: service_healthy }
+
+  gateway:
+    build: { context: ., args: { SERVICE: Gateway } }
+    ports:
+      - "5100:8080"     # http://localhost:5100/catalog/swagger, http://localhost:5100/ordering/swagger
+    environment:
+      ReverseProxy__Clusters__catalog__Destinations__default__Address: http://catalog:8080
+      ReverseProxy__Clusters__ordering__Destinations__default__Address: http://ordering:8080
+    depends_on: [catalog, ordering]

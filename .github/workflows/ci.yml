@@ -1,0 +1,28 @@
+name: CI
+
+on: [push, pull_request]
+
+jobs:
+  test:
+    name: Build and unit tests
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: 10.0.x
+      - run: dotnet test --configuration Release
+
+  e2e:
+    name: End-to-end (Docker Compose)
+    needs: test
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Start the stack
+        run: docker compose up -d --build --wait --wait-timeout 300 postgres rabbitmq && docker compose up -d --build
+      - name: Place orders through the gateway
+        run: bash deploy/e2e.sh
+      - name: Logs
+        if: failure()
+        run: docker compose logs --tail 150 catalog ordering gateway
